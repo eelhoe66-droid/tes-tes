@@ -208,22 +208,22 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         results = [
             # Menu 1: hi
-    InlineQueryResultPhoto(
-        id="info",
-        title="⚠️ hi",
-        description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
-        thumbnail_url="https://files.catbox.moe/n4zdf7.jpg",  # Gambar kecil di list menu
-        photo_url="https://files.catbox.moe/c84dkg.jpg",      # Gambar utama yang pasti muncul saat dipencet
-        caption="ga sih bercanda, pake aja",
-    ),
-    # Menu 2: misal
-    InlineQueryResultPhoto(
-        id="help",
-        title="misal",
-        description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
-        thumbnail_url="https://files.catbox.moe/faj4xi.jpg", # Gambar kecil di list menu
-        photo_url="https://files.catbox.moe/faj4xi.jpg",     # Gambar utama yang pasti muncul saat dipencet
-        caption="💡 London is blue -Subaru",
+            InlineQueryResultPhoto(
+                id="info",
+                title="⚠️ hi",
+                description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
+                thumbnail_url="https://files.catbox.moe/n4zdf7.jpg",  # Gambar kecil di list menu
+                photo_url="https://files.catbox.moe/c84dkg.jpg",      # Gambar utama yang pasti muncul saat dipencet
+                caption="ga sih bercanda, pake aja",
+             ),
+             # Menu 2: misal
+             InlineQueryResultPhoto(
+                 id="help",
+                 title="misal",
+                 description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
+                 thumbnail_url="https://files.catbox.moe/faj4xi.jpg", # Gambar kecil di list menu
+                 photo_url="https://files.catbox.moe/faj4xi.jpg",     # Gambar utama yang pasti muncul saat dipencet
+                 caption="💡 London is blue -Subaru",
     )
 ]
 
