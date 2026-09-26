@@ -188,68 +188,54 @@ def build_pagination_keyboard(current_page, total_pages, target_base, mode_key):
     return InlineKeyboardMarkup([buttons])
 
 # ================== INLINE HANDLER ==================
+from telegram import InlineQueryResultPhoto, InlineQueryResultArticle, InputTextMessageContent
+
+# ================== LINK FOTO CUSTOM ==================
+# Ganti dengan URL foto kamu (.jpg / .png)
+URL_FOTO_INFO = "https://files.catbox.moe/c84dkg.jpg"
+URL_THUMB_INFO = "https://files.catbox.moe/n4zdf7.jpg"
+
+URL_FOTO_MISAL = "https://files.catbox.moe/faj4xi.jpg"
+URL_THUMB_MISAL = "https://files.catbox.moe/faj4xi.jpg"
+
+
+# ================== POTONGAN KODE INLINE QUERY ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
     user = update.inline_query.from_user
-    uid = user.id
 
-    if uid in BANNED_USERS:
+    if user.id in BANNED_USERS:
         return
 
-    save_user(uid)
+    save_user(user.id)
 
     if not query:
         results = [
-            InlineQueryResultArticle(
+            # Menu 1: Foto + Teks Info
+            InlineQueryResultPhoto(
                 id="info",
                 title="⚠️ hi",
                 description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
-                input_message_content=InputTextMessageContent(
-                    "⚠️ Bot ini khusus gw dan temen temen gw, selain itu gw ban"
-                )
+                thumbnail_url=URL_THUMB_INFO,  # Gambar kecil di sebelah kiri list menu
+                photo_url=URL_FOTO_INFO,       # Foto besar yang terkirim saat dipencet
+                caption="p",
+                parse_mode="Markdown"
             ),
-            InlineQueryResultArticle(
+            # Menu 2: Foto + Teks Misal
+            InlineQueryResultPhoto(
                 id="help",
                 title="misal",
                 description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
-                input_message_content=InputTextMessageContent(
-                    "Contoh penggunaan:\n"
-                    " @sunless2bot adnan\n"
-                    " @sunless2bot uncommon adnan"
-                )
+                thumbnail_url=URL_THUMB_MISAL, # Gambar kecil di sebelah kiri list menu
+                photo_url=URL_FOTO_MISAL,      # Foto besar yang terkirim saat dipencet
+                caption=(
+                    "London is blue"
+                ),
+                parse_mode="Markdown"
             )
         ]
         await update.inline_query.answer(results, cache_time=1)
         return
-
-    parts = query.split(maxsplit=1)
-    
-    if parts[0].lower() in GENERATORS and len(parts) > 1:
-        mode_key = parts[0].lower()
-        base = parts[1].replace("@", "").strip()
-        mode_label = GENERATORS[mode_key][1]
-    else:
-        mode_key = "tamhur"
-        base = query.replace("@", "").strip()
-        mode_label = "tamhur"
-
-    loading_text = f"Klik tombol di bawah untuk mulai scan @{base} ({mode_label})..."
-
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("Mulai Scan", callback_data=f"runlive_{mode_key}_{base}")
-    ]])
-
-    results = [
-        InlineQueryResultArticle(
-            id=f"scan_{mode_key}_{base}_{int(time.time())}",
-            title=f"Scan @{base} ({mode_label})",
-            description=f"Langsung scan variasi username @{base}",
-            input_message_content=InputTextMessageContent(loading_text),
-            reply_markup=keyboard
-        )
-    ]
-    
-    await update.inline_query.answer(results, cache_time=1)
 
 # ================== CALLBACK QUERY HANDLER ==================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
