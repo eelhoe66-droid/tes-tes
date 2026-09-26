@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 from telethon import TelegramClient, functions
+from telethon.sessions import StringSession # <--- IMPORT STRING SESSION
 from telethon.errors import FloodWaitError, PeerFloodError
 from telegram import (
     Update, InlineQueryResultArticle, InputTextMessageContent,
@@ -35,12 +36,6 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-# Konfigurasi Proxy (Opsional, atur ke None jika tidak pakai proxy)
-# Contoh jika pakai SOCKS5:
-# PROXY_HOST = "123.45.67.89"
-# PROXY_PORT = 1080
-# PROXY_USER = None
-# PROXY_PASS = None
 PROXY_HOST = os.getenv("PROXY_HOST", None)
 PROXY_PORT = int(os.getenv("PROXY_PORT", "0")) if os.getenv("PROXY_PORT") else None
 PROXY_USER = os.getenv("PROXY_USER", None)
@@ -99,6 +94,19 @@ def load_bans():
             for line in f:
                 if line.strip(): BANNED_USERS.add(int(line.strip()))
 
+# ================== HELPER PAGINATION ==================
+def chunk_results(lst, chunk_size=15):
+    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
+def build_pagination_keyboard(current_page, total_pages, base, mode_key):
+    buttons = []
+    if current_page > 0:
+        buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page_{mode_key}_{base}_{current_page - 1}"))
+    buttons.append(InlineKeyboardButton(f"{current_page + 1}/{total_pages}", callback_data="noop"))
+    if current_page < total_pages - 1:
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{mode_key}_{base}_{current_page + 1}"))
+    return InlineKeyboardMarkup([buttons])
+
 # ================== GENERATORS ==================
 rata, tdk_rata, vokal = "asweruiozxcvnm", "qtypdfghjklb", "aeiou"
 
@@ -133,37 +141,37 @@ GENERATORS = {
     "vokal": (gen_vokal, "vokal"),
 }
 
-# ================== CORE LOGIC ==================
+# ================== CORE LOGIC (PERBAIKAN DENGAN RAILWAY ENV SESSIONS) ==================
 async def init_clients():
     if not API_ID or not API_HASH: 
         logger.error("❌ API_ID atau API_HASH kosong di Environment Variables!")
         return
 
-    # KODE BARU: Langsung cari file dengan awalan 'my_account'
-    # 1. Cek file my_account.session (tanpa angka)
-    session_targets = [f"{DATA_DIR}my_account"]
-    
-    # 2. Cek file my_account1.session sampai my_account20.session
-    for i in range(1, 21):
-        session_targets.append(f"{DATA_DIR}my_account{i}")
+    # MENGAMBIL SELURUH SESSION_1, SESSION_2, DST DARI ENVIRONMENT VARIABLES
+    session_keys = [k for k in os.environ.keys() if k.startswith("SESSION_")]
+    session_keys.sort(key=lambda x: int(x.split("_")[1]) if x.split("_")[1].isdigit() else 0)
 
-    for s in session_targets:
-        session_path = f"{s}.session"
-        if not os.path.exists(session_path):
+    if not session_keys:
+        logger.warning("⚠️ Tidak ada variabel SESSION_ yang ditemukan di Environment Variables!")
+        return
+
+    for key in session_keys:
+        session_str = os.getenv(key)
+        if not session_str:
             continue
             
         try:
-            c = TelegramClient(s, int(API_ID), API_HASH)
+            c = TelegramClient(StringSession(session_str), int(API_ID), API_HASH)
             await c.connect()
             
             if await c.is_user_authorized():
                 clients.append(c)
-                logger.info(f"✅ {session_path} BERHASIL terhubung dan Authorized!")
+                logger.info(f"✅ {key} BERHASIL terhubung dan Authorized!")
             else: 
-                logger.warning(f"⚠️ {session_path} ADA, tapi TIDAK Authorized (Beda API_ID / Sesi Expired)!")
+                logger.warning(f"⚠️ {key} ADA, tapi TIDAK Authorized (Expired / Terblokir)!")
                 await c.disconnect()
         except Exception as e: 
-            logger.error(f"❌ Gagal memuat {session_path}: {e}")
+            logger.error(f"❌ Gagal memuat {key}: {e}")
 
 # ================== INLINE HANDLER ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,7 +210,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         base = query.replace("@", "").strip()
         mode_label = "tamhur"
 
-    loading_text = f"Klik tombol di bawah untuk mulai scan @{base} ({mode_label})..."
+    loading_text = f"Klik tombol di bawah untuk mulai scan @{base} ({mode_label})"
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Mulai Scan", callback_data=f"runlive_{mode_key}_{base}")
@@ -235,7 +243,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not clients:
             await context.bot.edit_message_text(
                 inline_message_id=inline_msg_id,
-                text="❌ Tidak ada akun Telethon yang aktif/tersedia."
+                text="❌ acc gua limit"
             )
             return
 
@@ -244,7 +252,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if mode_key == "uncommon":
             raw_res += gen_canon(base)
 
-        # Tanpa batasan jumlah kandidat (bebas/unbound)
         candidates = list(set(raw_res))
         found_avail = []
         last_update_time = time.time()
@@ -262,7 +269,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     break
 
                 try:
-                    # Delay acak 2.5s - 4.5s per request per akun agar sangat aman dari ban
                     await asyncio.sleep(random.uniform(2.5, 4.5))
                     
                     ok = await asyncio.wait_for(
@@ -275,7 +281,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         found_avail.append(res_str)
 
                         now = time.time()
-                        # Update status live UI setiap 3.0 detik
                         if now - last_update_time > 3.0:
                             last_update_time = now
                             live_text = (
@@ -296,11 +301,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except PeerFloodError:
                     logger.warning("⚠️ Akun terkena PeerFlood. Mengistirahatkan akun selama 5 menit.")
                     await asyncio.sleep(300)
-                    work_queue.put_nowait(usn)  # Kembalikan task ke antrean
+                    work_queue.put_nowait(usn)
                 except FloodWaitError as e:
                     logger.warning(f"⚠️ Akun terkena FloodWait {e.seconds}s. Mengistirahatkan sementara.")
                     await asyncio.sleep(e.seconds + 5)
-                    work_queue.put_nowait(usn)  # Kembalikan task ke antrean
+                    work_queue.put_nowait(usn)
                 except asyncio.TimeoutError:
                     work_queue.put_nowait(usn)
                 except Exception as e:
@@ -308,7 +313,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 finally:
                     work_queue.task_done()
 
-        # Jalankan worker secara asinkron terdistribusi ke seluruh akun aktif
         await asyncio.gather(*(worker_account(c) for c in clients))
 
         if not found_avail:
@@ -328,7 +332,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         page_text = (
-            f"hasil scan untuk @{base} ({lbl})\n"
+            f"hasil scan untuk @{base} ({lbl}) \n"
             f"ada {len(found_avail)} usn tersedia\n\n" + 
             "\n".join(pages[0])
         )
@@ -374,7 +378,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=page_text,
                 reply_markup=reply_markup
             )
-            await query.answer(f"Halaman {page_idx + 1}")
+            await query.answer(f"{page_idx + 1}")
         except Exception:
             await query.answer()
 
