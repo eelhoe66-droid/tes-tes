@@ -203,7 +203,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         results = [
             InlineQueryResultArticle(
                 id="help",
-                title="misal",
+                title="hi",
                 description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
                 input_message_content=InputTextMessageContent(
                     "bot ini khusus gw dan temen temen gw, selain itu gw ban\n\n"
