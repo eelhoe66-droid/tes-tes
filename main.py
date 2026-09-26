@@ -187,18 +187,14 @@ def build_pagination_keyboard(current_page, total_pages, target_base, mode_key):
     
     return InlineKeyboardMarkup([buttons])
 
-# ================== INLINE HANDLER ==================
-from telegram import InlineQueryResultArticle, InputTextMessageContent
-
 # ================== LINK FOTO CUSTOM ==================
-# Ganti dengan URL foto kamu (.jpg / .png)
 URL_FOTO_INFO = "https://files.catbox.moe/c84dkg.jpg"
 URL_THUMB_INFO = "https://files.catbox.moe/n4zdf7.jpg"
 
 URL_FOTO_MISAL = "https://files.catbox.moe/faj4xi.jpg"
 URL_THUMB_MISAL = "https://files.catbox.moe/faj4xi.jpg"
 
-# ================== POTONGAN KODE INLINE QUERY ==================
+# ================== INLINE HANDLER ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
     user = update.inline_query.from_user
@@ -215,9 +211,8 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 id="info",
                 title="⚠️ hi",
                 description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
-                thumbnail_url=URL_THUMB_INFO,  # Gambar kecil kotak di sebelah kiri
+                thumbnail_url=URL_THUMB_INFO, 
                 input_message_content=InputTextMessageContent(
-                    # Trik menyisipkan foto di paling depan teks lewat tag HTML hidden (&#8203;)
                     text=f'<a href="{URL_FOTO_INFO}">&#8203;</a> ga sih bercanda, pake aja',
                     parse_mode="HTML"
                 )
@@ -227,7 +222,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 id="help",
                 title="misal",
                 description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
-                thumbnail_url=URL_THUMB_MISAL, # Gambar kecil kotak di sebelah kiri
+                thumbnail_url=URL_THUMB_MISAL,
                 input_message_content=InputTextMessageContent(
                     text=f'<a href="{URL_FOTO_MISAL}">&#8203;</a>💡 London is blue -Subaru',
                     parse_mode="HTML"
@@ -236,6 +231,36 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await update.inline_query.answer(results, cache_time=1)
         return
+
+    # Proses pencarian scan saat query diisi
+    parts = query.split(maxsplit=1)
+    
+    if parts[0].lower() in GENERATORS and len(parts) > 1:
+        mode_key = parts[0].lower()
+        base = parts[1].replace("@", "").strip()
+        mode_label = GENERATORS[mode_key][1]
+    else:
+        mode_key = "tamhur"
+        base = query.replace("@", "").strip()
+        mode_label = "tamhur"
+
+    loading_text = f"Klik tombol di bawah untuk mulai scan @{base} ({mode_label})..."
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Mulai Scan", callback_data=f"runlive_{mode_key}_{base}")
+    ]])
+
+    results = [
+        InlineQueryResultArticle(
+            id=f"scan_{mode_key}_{base}_{int(time.time())}",
+            title=f"Scan @{base} ({mode_label})",
+            description=f"Langsung scan variasi username @{base}",
+            input_message_content=InputTextMessageContent(loading_text),
+            reply_markup=keyboard
+        )
+    ]
+    
+    await update.inline_query.answer(results, cache_time=1)
 
 # ================== CALLBACK QUERY HANDLER ==================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -261,7 +286,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, mode_key, base = data.split("_", 2)
         await query.answer("Memulai scan...")
 
-        # NOTIFIKASI BARU Dikirim ke Admin HANYA ketika tombol "Mulai Scan" ditekan
         await notify_admin(context, user, "Eksekusi Scan Username", f"Mode: {mode_key} | Query: @{base}")
 
         available_clients = [c for c in clients if client_cooldown[c] <= time.time()]
@@ -447,7 +471,6 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 
     # Jika Admin membalas pesan pengguna
     if user.id == ADMIN_ID:
-        # A. Admin mengetik balasan setelah menekan tombol [Balas Pesan]
         if "reply_to" in context.user_data:
             target_id = int(context.user_data.pop("reply_to"))
             try:
@@ -457,12 +480,10 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 await update.message.reply_text(f"❌ Gagal mengirim pesan ke user: {e}")
             return
 
-        # B. Admin menggunakan fitur bawaan Telegram Reply pada pesan notifikasi
         if update.message.reply_to_message:
             rep_text = update.message.reply_to_message.text or ""
             if "ID:" in rep_text:
                 try:
-                    # Ambil User ID dari teks notifikasi
                     target_id = int(rep_text.split("ID:")[1].split()[0].replace("`", ""))
                     await context.bot.send_message(chat_id=target_id, text=f"💬 **Pesan dari Admin:**\n{msg_text}", parse_mode="Markdown")
                     await update.message.reply_text(f"✅ Balasan berhasil dikirim ke `{target_id}`", parse_mode="Markdown")
@@ -496,6 +517,10 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logger.error(f"Gagal meneruskan pesan ke admin: {e}")
 
+# ================== ERROR HANDLER ==================
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Exception occurred while handling an update:", exc_info=context.error)
+
 # ================== POST INIT & MAIN ==================
 async def post_init(application):
     logger.info("⚙️ Inisialisasi Telethon sessions...")
@@ -522,6 +547,8 @@ def main():
     
     # Handler pesan PM/PC (Private Chat)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
+
+    app.add_error_handler(error_handler)
 
     logger.info("🚀 Bot berjalan...")
     app.run_polling(drop_pending_updates=True)
