@@ -1,10 +1,7 @@
 .env
-
-banned.txt
-users.txt
-
-*.session
-*.session-journal
-
 __pycache__/
 *.pyc
+banned.txt
+users.txt
+*.session
+*.session-journal
