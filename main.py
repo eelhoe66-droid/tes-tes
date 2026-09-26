@@ -157,7 +157,7 @@ async def init_clients():
             logger.warning("⚠️ python-socks tidak terinstall. Menjalankan tanpa proxy.")
 
     for i in range(1, 21):
-        s = f"{DATA_DIR}acc{i}"
+        s = f"{DATA_DIR}my_account{i}"
         if not os.path.exists(f"{s}.session"):
             continue
         try:
