@@ -136,55 +136,38 @@ GENERATORS = {
 # ================== CORE LOGIC ==================
 async def init_clients():
     if not API_ID or not API_HASH: 
-        logger.error("❌ API_ID atau API_HASH kosong!")
+        logger.error("❌ API_ID atau API_HASH kosong di Environment Variables!")
         return
 
-    # Setup konfigurasi proxy jika tersedia
-    proxy_config = None
-    if PROXY_HOST and PROXY_PORT:
-        try:
-            import python_socks
-            proxy_config = (
-                python_socks.ProxyType.SOCKS5,
-                PROXY_HOST,
-                PROXY_PORT,
-                True,
-                PROXY_USER,
-                PROXY_PASS
-            )
-            logger.info("🌐 Menggunakan konfigurasi Proxy SOCKS5.")
-        except ImportError:
-            logger.warning("⚠️ python-socks tidak terinstall. Menjalankan tanpa proxy.")
+    # Debugging: Cetak semua file yang ada di folder root Railway
+    try:
+        files_in_dir = os.listdir(DATA_DIR)
+        session_files = [f for f in files_in_dir if f.endswith('.session')]
+        logger.info(f"📂 Daftar file .session yang terbaca di Railway: {session_files}")
+    except Exception as e:
+        logger.error(f"Gagal membaca folder: {e}")
 
     for i in range(1, 21):
-        s = f"{DATA_DIR}my_account{i}"
-        if not os.path.exists(f"{s}.session"):
+        # Sesuaikan 'acc' jika nama file session Anda berawalan lain
+        s = f"{DATA_DIR}acc{i}"
+        session_path = f"{s}.session"
+        
+        if not os.path.exists(session_path):
             continue
+            
         try:
-            c = TelegramClient(s, int(API_ID), API_HASH, proxy=proxy_config)
+            logger.info(f"🔄 Mencoba menghubungkan {session_path}...")
+            c = TelegramClient(s, int(API_ID), API_HASH)
             await c.connect()
+            
             if await c.is_user_authorized():
                 clients.append(c)
-                logger.info(f"✅ acc{i} Ready")
+                logger.info(f"✅ {session_path} BERHASIL Authorized!")
             else: 
+                logger.warning(f"⚠️ {session_path} ADA, tapi TIDAK Authorized (Beda API_ID / Sesi Hangus)!")
                 await c.disconnect()
         except Exception as e: 
-            logger.debug(f"Gagal memuat acc{i}: {e}")
-
-def chunk_results(items, chunk_size=15):
-    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
-
-def build_pagination_keyboard(current_page, total_pages, target_base, mode_key):
-    if total_pages <= 1:
-        return None
-    
-    buttons = []
-    for i in range(total_pages):
-        label = f"• {i+1} •" if i == current_page else f"{i+1}"
-        buttons.append(InlineKeyboardButton(label, callback_data=f"page_{mode_key}_{target_base}_{i}"))
-    
-    return InlineKeyboardMarkup([buttons])
-
+            logger.error(f"❌ Gagal memuat {session_path}: {e}")
 # ================== INLINE HANDLER ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
