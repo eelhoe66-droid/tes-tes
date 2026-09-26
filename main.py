@@ -31,7 +31,6 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, 
     InlineQueryHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
-from telegram import InlineQueryResultPhoto
 
 # Configuration from Environment Variables
 API_ID = os.getenv("API_ID")
@@ -188,50 +187,41 @@ def build_pagination_keyboard(current_page, total_pages, target_base, mode_key):
     
     return InlineKeyboardMarkup([buttons])
 
-# ================== LINK FOTO CUSTOM ==================
-URL_FOTO_INFO = "https://files.catbox.moe/c84dkg.jpg"
-URL_THUMB_INFO = "https://files.catbox.moe/n4zdf7.jpg"
-
-URL_FOTO_MISAL = "https://files.catbox.moe/faj4xi.jpg"
-URL_THUMB_MISAL = "https://files.catbox.moe/faj4xi.jpg"
-
 # ================== INLINE HANDLER ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
     user = update.inline_query.from_user
+    uid = user.id
 
-    if user.id in BANNED_USERS:
+    if uid in BANNED_USERS:
         return
 
-    save_user(user.id)
+    save_user(uid)
 
     if not query:
         results = [
-            # Menu 1: hi
-            InlineQueryResultPhoto(
+            InlineQueryResultArticle(
                 id="info",
-                title="⚠️ hi",
+                title="⚠️ Informasi Bot",
                 description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
-                thumbnail_url="https://files.catbox.moe/n4zdf7.jpg",  # Gambar kecil di list menu
-                photo_url="https://files.catbox.moe/c84dkg.jpg",      # Gambar utama yang pasti muncul saat dipencet
-                caption="ga sih bercanda, pake aja",
-             ),
-             # Menu 2: misal
-             InlineQueryResultPhoto(
-                 id="help",
-                 title="misal",
-                 description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
-                 thumbnail_url="https://files.catbox.moe/faj4xi.jpg", # Gambar kecil di list menu
-                 photo_url="https://files.catbox.moe/faj4xi.jpg",     # Gambar utama yang pasti muncul saat dipencet
-                 caption="💡 London is blue -Subaru",
-    )
-]
-
-   
+                input_message_content=InputTextMessageContent(
+                    "..."
+                )
+            ),
+            InlineQueryResultArticle(
+                id="help",
+                title="misal",
+                description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
+                input_message_content=InputTextMessageContent(
+                    "Contoh penggunaan:\n"
+                    " @sunless2bot adnan\n"
+                    " @sunless2bot uncommon adnan"
+                )
+            )
+        ]
         await update.inline_query.answer(results, cache_time=1)
         return
 
-    # Proses pencarian scan saat query diisi
     parts = query.split(maxsplit=1)
     
     if parts[0].lower() in GENERATORS and len(parts) > 1:
@@ -285,6 +275,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, mode_key, base = data.split("_", 2)
         await query.answer("Memulai scan...")
 
+        # NOTIFIKASI BARU Dikirim ke Admin HANYA ketika tombol "Mulai Scan" ditekan
         await notify_admin(context, user, "Eksekusi Scan Username", f"Mode: {mode_key} | Query: @{base}")
 
         available_clients = [c for c in clients if client_cooldown[c] <= time.time()]
@@ -470,6 +461,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 
     # Jika Admin membalas pesan pengguna
     if user.id == ADMIN_ID:
+        # A. Admin mengetik balasan setelah menekan tombol [Balas Pesan]
         if "reply_to" in context.user_data:
             target_id = int(context.user_data.pop("reply_to"))
             try:
@@ -479,10 +471,12 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
                 await update.message.reply_text(f"❌ Gagal mengirim pesan ke user: {e}")
             return
 
+        # B. Admin menggunakan fitur bawaan Telegram Reply pada pesan notifikasi
         if update.message.reply_to_message:
             rep_text = update.message.reply_to_message.text or ""
             if "ID:" in rep_text:
                 try:
+                    # Ambil User ID dari teks notifikasi
                     target_id = int(rep_text.split("ID:")[1].split()[0].replace("`", ""))
                     await context.bot.send_message(chat_id=target_id, text=f"💬 **Pesan dari Admin:**\n{msg_text}", parse_mode="Markdown")
                     await update.message.reply_text(f"✅ Balasan berhasil dikirim ke `{target_id}`", parse_mode="Markdown")
@@ -512,13 +506,9 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
 
     try:
         await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown", reply_markup=reply_kb)
-        await update.message.reply_text("Pesan kamu telah diteruskan ke admin.")
+        await update.message.reply_text("...")
     except Exception as e:
-        logger.error(f"Gagal meneruskan pesan ke admin: {e}")
-
-# ================== ERROR HANDLER ==================
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Exception occurred while handling an update:", exc_info=context.error)
+        logger.error(f"Gagal: {e}")
 
 # ================== POST INIT & MAIN ==================
 async def post_init(application):
@@ -546,8 +536,6 @@ def main():
     
     # Handler pesan PM/PC (Private Chat)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private_message))
-
-    app.add_error_handler(error_handler)
 
     logger.info("🚀 Bot berjalan...")
     app.run_polling(drop_pending_updates=True)
