@@ -1,5 +1,10 @@
 .env
+
+banned.txt
+users.txt
+
+*.session
+*.session-journal
+
 __pycache__/
 *.pyc
-.vscode/
-.idea/
