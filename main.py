@@ -29,7 +29,8 @@ from telegram import (
 )
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, 
-    InlineQueryHandler, CallbackQueryHandler, ContextTypes
+    InlineQueryHandler, CallbackQueryHandler, ChosenInlineResultHandler,
+    MessageHandler, filters, ContextTypes
 )
 
 # Configuration from Environment Variables
@@ -63,14 +64,14 @@ async def notify_admin(context: ContextTypes.DEFAULT_TYPE, user, action_type: st
     user_id = user.id
     
     text = (
-        f"👤 Aktivitas Pengguna Baru\n"
+        f"👤 Aktivitas Pengguna\n"
         f"• Aksi: {action_type}\n"
         f"• Nama: {full_name}\n"
         f"• Username: {username}\n"
         f"• ID: `{user_id}`"
     )
     if query_details:
-        text += f"\n• **Query:** `{query_details}`"
+        text += f"\n• Query/Pesan: `{query_details}`"
         
     try:
         await context.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
@@ -95,6 +96,19 @@ def load_bans():
         with open(BAN_FILE, "r") as f:
             for line in f:
                 if line.strip(): BANNED_USERS.add(int(line.strip()))
+
+def save_ban(user_id):
+    BANNED_USERS.add(user_id)
+    with open(BAN_FILE, "w") as f:
+        for uid in BANNED_USERS:
+            f.write(f"{uid}\n")
+
+def remove_ban(user_id):
+    if user_id in BANNED_USERS:
+        BANNED_USERS.remove(user_id)
+        with open(BAN_FILE, "w") as f:
+            for uid in BANNED_USERS:
+                f.write(f"{uid}\n")
 
 # ================== GENERATORS ==================
 rata, tdk_rata, vokal = "asweruiozxcvnm", "qtypdfghjklb", "aeiou"
@@ -184,15 +198,15 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     save_user(uid)
-    await notify_admin(context, user, "Inline Query", query)
 
     if not query:
         results = [
             InlineQueryResultArticle(
                 id="help",
                 title="misal",
-                description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
+                description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
                 input_message_content=InputTextMessageContent(
+                    "bot ini khusus gw dan temen temen gw, selain itu gw ban\n\n"
                     "Contoh penggunaan:\n"
                     " @sunless2bot adnan"
                 )
@@ -230,9 +244,23 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.inline_query.answer(results, cache_time=1)
 
+# Notifikasi ke admin hanya terkirim ketika user memilih/mengirim hasil inline query
+async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.chosen_inline_result.from_user
+    if user.id in BANNED_USERS:
+        return
+    query = update.chosen_inline_result.query
+    await notify_admin(context, user, "Mengirim Inline Query", query)
+
 # ================== CALLBACK QUERY HANDLER (SAFE SCAN & PAGINATION) ==================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user = query.from_user
+    
+    if user.id in BANNED_USERS:
+        await query.answer("❌ Kamu telah dibanned dari penggunaan bot ini.", show_alert=True)
+        return
+
     data = query.data
     inline_msg_id = query.inline_message_id
 
@@ -240,6 +268,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("runlive_"):
         _, mode_key, base = data.split("_", 2)
         await query.answer("Memulai scan...")
+        
+        # Kirim notifikasi saat tombol scan diklik
+        await notify_admin(context, user, "Menjalankan Live Scan", f"Mode: {mode_key}, Base: @{base}")
 
         available_clients = [c for c in clients if client_cooldown[c] <= time.time()]
         if not available_clients:
@@ -254,12 +285,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if mode_key == "uncommon":
             raw_res += gen_canon(base)
 
-        # Batasi maksimal 100 kandidat agar pindaian lebih aman
         candidates = list(set(raw_res))[:100]
         found_avail = []
         last_update_time = time.time()
         
-        # PENGATURAN AMAN: Batasi jumlah worker paralel maksimum sesuai jumlah akun aktif
         sem = asyncio.Semaphore(max(1, len(available_clients)))
 
         async def worker(u):
@@ -271,7 +300,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await asyncio.sleep(0.2)
                         continue
                     try:
-                        # Jeda acak antar request (0.2 - 0.4s) agar terhindar dari spam detector Telegram
                         await asyncio.sleep(random.uniform(0.2, 0.4))
                         
                         ok = await asyncio.wait_for(
@@ -284,7 +312,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             found_avail.append(res_str)
 
                             now = time.time()
-                            # Edit status live minimal jeda 3 detik agar aman dari limit Telegram Bot API
                             if now - last_update_time > 3.0:
                                 last_update_time = now
                                 live_text = (
@@ -313,7 +340,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         return None
                 return None
 
-        # Jalankan pindaian secara async teratur
         await asyncio.gather(*(worker(u) for u in candidates))
 
         if not found_avail:
@@ -384,13 +410,57 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             await query.answer()
 
-# ================== COMMAND HANDLERS ==================
+# ================== COMMAND & MESSAGE HANDLERS ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id in BANNED_USERS: return
     save_user(user.id)
     await notify_admin(context, user, "Menjalankan /start")
     await update.message.reply_text("P")
+
+# Handling semua pesan masuk (PM Bot)
+async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id in BANNED_USERS:
+        return
+    save_user(user.id)
+    text = update.message.text
+    # Notifikasi pesan pribadi ke Admin
+    await notify_admin(context, user, "Pesan Pribadi", text)
+
+# Command khusus Admin untuk Ban
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID:
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Penggunaan: `/ban <user_id>`", parse_mode="Markdown")
+        return
+    
+    try:
+        target_id = int(context.args[0])
+        save_ban(target_id)
+        await update.message.reply_text(f"✅ ID `{target_id}` telah berhasil dibanned.", parse_mode="Markdown")
+    except ValueError:
+        await update.message.reply_text("❌ ID Pengguna tidak valid.")
+
+# Command khusus Admin untuk Unban
+async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID:
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Penggunaan: `/unban <user_id>`", parse_mode="Markdown")
+        return
+    
+    try:
+        target_id = int(context.args[0])
+        remove_ban(target_id)
+        await update.message.reply_text(f"✅ ID `{target_id}` telah dihapus dari daftar ban.", parse_mode="Markdown")
+    except ValueError:
+        await update.message.reply_text("❌ ID Pengguna tidak valid.")
 
 async def post_init(application):
     logger.info("⚙️ Inisialisasi Telethon sessions...")
@@ -408,8 +478,15 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ban", ban_user))
+    app.add_handler(CommandHandler("unban", unban_user))
+    
     app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(ChosenInlineResultHandler(chosen_inline_result))
     app.add_handler(CallbackQueryHandler(handle_callback))
+    
+    # Handler pesan obrolan langsung/private chat ke bot
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_private_message))
 
     logger.info("🚀 Bot berjalan...")
     app.run_polling(drop_pending_updates=True)
