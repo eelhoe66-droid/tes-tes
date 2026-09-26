@@ -9,9 +9,11 @@ import random
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Sembunyikan log internal MTProtoSender Telethon agar terminal bersih
 logging.getLogger("telethon.network.mtprotosender").setLevel(logging.WARNING)
 logging.getLogger("telethon.network.telegrambarebodysender").setLevel(logging.WARNING)
 
+# Load dotenv jika dijalankan secara lokal
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -19,8 +21,8 @@ except ImportError:
     pass
 
 from telethon import TelegramClient, functions
-from telethon.sessions import StringSession # <--- IMPORT STRING SESSION
-from telethon.errors import FloodWaitError, PeerFloodError
+from telethon.sessions import StringSession
+from telethon.errors import FloodWaitError
 from telegram import (
     Update, InlineQueryResultArticle, InputTextMessageContent,
     InlineKeyboardMarkup, InlineKeyboardButton
@@ -36,76 +38,63 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-PROXY_HOST = os.getenv("PROXY_HOST", None)
-PROXY_PORT = int(os.getenv("PROXY_PORT", "0")) if os.getenv("PROXY_PORT") else None
-PROXY_USER = os.getenv("PROXY_USER", None)
-PROXY_PASS = os.getenv("PROXY_PASS", None)
-
 DATA_DIR = "./" 
 BAN_FILE = f"{DATA_DIR}banned.txt"
 USER_FILE = f"{DATA_DIR}users.txt"
 
 BANNED_USERS = set()
 clients = []
+client_cooldown = {}
+client_index = 0
 ALL_USERS = set()
+
+# Cache sementara hasil scan per inline message id
 SCAN_CACHE = {}
 
-# ================== PERSISTENCE & TRACKING ==================
+# ================== NOTIFY ADMIN ==================
+async def notify_admin(context: ContextTypes.DEFAULT_TYPE, user, action_type: str, query_details: str = ""):
+    if not ADMIN_ID:
+        return
+    
+    first_name = user.first_name or ""
+    last_name = user.last_name or ""
+    full_name = f"{first_name} {last_name}".strip()
+    username = f"@{user.username}" if user.username else "Tidak ada username"
+    user_id = user.id
+    
+    text = (
+        f"👤 Aktivitas Pengguna Baru\n"
+        f"• Aksi: {action_type}\n"
+        f"• Nama: {full_name}\n"
+        f"• Username: {username}\n"
+        f"• ID: `{user_id}`"
+    )
+    if query_details:
+        text += f"\n• **Query:** `{query_details}`"
+        
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Gagal mengirim notifikasi ke admin: {e}")
+
+# ================== PERSISTENCE ==================
 def load_users():
     if os.path.exists(USER_FILE):
-        with open(USER_FILE, "r", encoding="utf-8") as f:
+        with open(USER_FILE, "r") as f:
             for line in f:
-                line = line.strip()
-                if line:
-                    uid_part = line.split("|")[0].strip()
-                    if uid_part.isdigit():
-                        ALL_USERS.add(int(uid_part))
+                if line.strip(): ALL_USERS.add(int(line.strip()))
 
-async def track_user(user, context: ContextTypes.DEFAULT_TYPE):
-    if not user or user.id in BANNED_USERS:
-        return
-
-    if user.id not in ALL_USERS:
-        ALL_USERS.add(user.id)
-        
-        username_str = f"@{user.username}" if user.username else "Tanpa Username"
-        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        user_line = f"{user.id} | {username_str} | {full_name}\n"
-        
-        with open(USER_FILE, "a", encoding="utf-8") as f:
-            f.write(user_line)
-
-        if ADMIN_ID:
-            try:
-                admin_text = (
-                    f"👤 <b>Pengguna Baru Terdeteksi!</b>\n"
-                    f"• <b>ID:</b> <code>{user.id}</code>\n"
-                    f"• <b>Nama:</b> {full_name}\n"
-                    f"• <b>Username:</b> {username_str}\n"
-                    f"• <b>Total Pengguna:</b> {len(ALL_USERS)}"
-                )
-                await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
-            except Exception as e:
-                logger.error(f"Gagal mengirim notifikasi admin: {e}")
+def save_user(user_id):
+    if user_id not in ALL_USERS:
+        ALL_USERS.add(user_id)
+        with open(USER_FILE, "a") as f:
+            f.write(f"{user_id}\n")
 
 def load_bans():
     if os.path.exists(BAN_FILE):
         with open(BAN_FILE, "r") as f:
             for line in f:
                 if line.strip(): BANNED_USERS.add(int(line.strip()))
-
-# ================== HELPER PAGINATION ==================
-def chunk_results(lst, chunk_size=15):
-    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
-
-def build_pagination_keyboard(current_page, total_pages, base, mode_key):
-    buttons = []
-    if current_page > 0:
-        buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page_{mode_key}_{base}_{current_page - 1}"))
-    buttons.append(InlineKeyboardButton(f"{current_page + 1}/{total_pages}", callback_data="noop"))
-    if current_page < total_pages - 1:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{mode_key}_{base}_{current_page + 1}"))
-    return InlineKeyboardMarkup([buttons])
 
 # ================== GENERATORS ==================
 rata, tdk_rata, vokal = "asweruiozxcvnm", "qtypdfghjklb", "aeiou"
@@ -141,58 +130,71 @@ GENERATORS = {
     "vokal": (gen_vokal, "vokal"),
 }
 
-# ================== CORE LOGIC (PERBAIKAN DENGAN RAILWAY ENV SESSIONS) ==================
+# ================== CORE LOGIC ==================
 async def init_clients():
     if not API_ID or not API_HASH: 
-        logger.error("❌ API_ID atau API_HASH kosong di Environment Variables!")
+        logger.error("❌ API_ID atau API_HASH kosong!")
         return
-
-    # MENGAMBIL SELURUH SESSION_1, SESSION_2, DST DARI ENVIRONMENT VARIABLES
-    session_keys = [k for k in os.environ.keys() if k.startswith("SESSION_")]
-    session_keys.sort(key=lambda x: int(x.split("_")[1]) if x.split("_")[1].isdigit() else 0)
-
-    if not session_keys:
-        logger.warning("⚠️ Tidak ada variabel SESSION_ yang ditemukan di Environment Variables!")
-        return
-
-    for key in session_keys:
-        session_str = os.getenv(key)
+    for i in range(1, 21):
+        session_str = os.getenv(f"SESSION_{i}")
         if not session_str:
             continue
-            
         try:
             c = TelegramClient(StringSession(session_str), int(API_ID), API_HASH)
             await c.connect()
-            
             if await c.is_user_authorized():
                 clients.append(c)
-                logger.info(f"✅ {key} BERHASIL terhubung dan Authorized!")
+                client_cooldown[c] = 0
+                logger.info(f"✅ acc{i} (StringSession) Ready")
             else: 
-                logger.warning(f"⚠️ {key} ADA, tapi TIDAK Authorized (Expired / Terblokir)!")
                 await c.disconnect()
         except Exception as e: 
-            logger.error(f"❌ Gagal memuat {key}: {e}")
+            logger.debug(f"Gagal memuat SESSION_{i}: {e}")
+
+def get_available_client():
+    global client_index
+    now = time.time()
+    available = [c for c in clients if client_cooldown[c] <= now]
+    if not available: return None
+    client = available[client_index % len(available)]
+    client_index += 1
+    return client
+
+def chunk_results(items, chunk_size=15):
+    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
+
+def build_pagination_keyboard(current_page, total_pages, target_base, mode_key):
+    if total_pages <= 1:
+        return None
+    
+    buttons = []
+    for i in range(total_pages):
+        label = f"• {i+1} •" if i == current_page else f"{i+1}"
+        buttons.append(InlineKeyboardButton(label, callback_data=f"page_{mode_key}_{target_base}_{i}"))
+    
+    return InlineKeyboardMarkup([buttons])
 
 # ================== INLINE HANDLER ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
-    from_user = update.inline_query.from_user
+    user = update.inline_query.from_user
+    uid = user.id
 
-    if from_user.id in BANNED_USERS:
+    if uid in BANNED_USERS:
         return
 
-    await track_user(from_user, context)
+    save_user(uid)
+    await notify_admin(context, user, "Inline Query", query)
 
     if not query:
         results = [
             InlineQueryResultArticle(
                 id="help",
-                title="Cara Penggunaan",
-                description="Contoh: adnan, uncommon adnan, tamping adnan, dll",
+                title="misal",
+                description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
                 input_message_content=InputTextMessageContent(
                     "Contoh penggunaan:\n"
-                    " @botusername adnan\n"
-                    " @botusername uncommon adnan"
+                    " @sunless2bot adnan"
                 )
             )
         ]
@@ -210,7 +212,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         base = query.replace("@", "").strip()
         mode_label = "tamhur"
 
-    loading_text = f"Klik tombol di bawah untuk mulai scan @{base} ({mode_label})"
+    loading_text = f"Klik tombol di bawah untuk mulai scan @{base} ({mode_label})..."
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Mulai Scan", callback_data=f"runlive_{mode_key}_{base}")
@@ -228,19 +230,19 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.inline_query.answer(results, cache_time=1)
 
-# ================== CALLBACK QUERY HANDLER ==================
+# ================== CALLBACK QUERY HANDLER (SAFE SCAN & PAGINATION) ==================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     inline_msg_id = query.inline_message_id
 
-    await track_user(query.from_user, context)
-
+    # 1. Trigger Mulai Scan di Channel / Grup
     if data.startswith("runlive_"):
         _, mode_key, base = data.split("_", 2)
         await query.answer("Memulai scan...")
 
-        if not clients:
+        available_clients = [c for c in clients if client_cooldown[c] <= time.time()]
+        if not available_clients:
             await context.bot.edit_message_text(
                 inline_message_id=inline_msg_id,
                 text="❌ acc gua limit"
@@ -252,73 +254,72 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if mode_key == "uncommon":
             raw_res += gen_canon(base)
 
-        candidates = list(set(raw_res))
+        # Batasi maksimal 100 kandidat agar pindaian lebih aman
+        candidates = list(set(raw_res))[:100]
         found_avail = []
         last_update_time = time.time()
         
-        work_queue = asyncio.Queue()
-        for c in candidates:
-            work_queue.put_nowait(c)
+        # PENGATURAN AMAN: Batasi jumlah worker paralel maksimum sesuai jumlah akun aktif
+        sem = asyncio.Semaphore(max(1, len(available_clients)))
 
-        async def worker_account(client):
+        async def worker(u):
             nonlocal last_update_time
-            while not work_queue.empty():
-                try:
-                    usn = work_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+            async with sem:
+                for _ in range(2):
+                    c = get_available_client()
+                    if not c:
+                        await asyncio.sleep(0.2)
+                        continue
+                    try:
+                        # Jeda acak antar request (0.2 - 0.4s) agar terhindar dari spam detector Telegram
+                        await asyncio.sleep(random.uniform(0.2, 0.4))
+                        
+                        ok = await asyncio.wait_for(
+                            c(functions.account.CheckUsernameRequest(u)), 
+                            timeout=4.0
+                        )
+                        
+                        if ok:
+                            res_str = f"🟢 @{u}"
+                            found_avail.append(res_str)
 
-                try:
-                    await asyncio.sleep(random.uniform(2.5, 4.5))
-                    
-                    ok = await asyncio.wait_for(
-                        client(functions.account.CheckUsernameRequest(usn)),
-                        timeout=5.0
-                    )
-                    
-                    if ok:
-                        res_str = f"🟢 @{usn}"
-                        found_avail.append(res_str)
-
-                        now = time.time()
-                        if now - last_update_time > 3.0:
-                            last_update_time = now
-                            live_text = (
-                                f"scanning @{base} ({lbl})...\n"
-                                f"diproses: {len(candidates) - work_queue.qsize()}/{len(candidates)}\n"
-                                f"ditemukan: {len(found_avail)}\n\n" +
-                                "\n".join(found_avail[:15]) +
-                                ("\n..." if len(found_avail) > 15 else "")
-                            )
-                            try:
-                                await context.bot.edit_message_text(
-                                    inline_message_id=inline_msg_id,
-                                    text=live_text
+                            now = time.time()
+                            # Edit status live minimal jeda 3 detik agar aman dari limit Telegram Bot API
+                            if now - last_update_time > 3.0:
+                                last_update_time = now
+                                live_text = (
+                                    f"scanning @{base} ({lbl})...\n"
+                                    f"ditemukan: {len(found_avail)}\n\n" +
+                                    "\n".join(found_avail[:15]) +
+                                    ("\n..." if len(found_avail) > 15 else "")
                                 )
-                            except Exception:
-                                pass
+                                try:
+                                    await context.bot.edit_message_text(
+                                        inline_message_id=inline_msg_id,
+                                        text=live_text
+                                    )
+                                except Exception:
+                                    pass
+                            return res_str
+                        return None
+                    except FloodWaitError as e:
+                        logger.warning(f"⚠️ Account terkena FloodWait {e.seconds}s. Istirahat sementara.")
+                        client_cooldown[c] = time.time() + e.seconds + 5
+                        continue
+                    except asyncio.TimeoutError:
+                        client_cooldown[c] = time.time() + 10
+                        continue
+                    except Exception:
+                        return None
+                return None
 
-                except PeerFloodError:
-                    logger.warning("⚠️ Akun terkena PeerFlood. Mengistirahatkan akun selama 5 menit.")
-                    await asyncio.sleep(300)
-                    work_queue.put_nowait(usn)
-                except FloodWaitError as e:
-                    logger.warning(f"⚠️ Akun terkena FloodWait {e.seconds}s. Mengistirahatkan sementara.")
-                    await asyncio.sleep(e.seconds + 5)
-                    work_queue.put_nowait(usn)
-                except asyncio.TimeoutError:
-                    work_queue.put_nowait(usn)
-                except Exception as e:
-                    logger.debug(f"Error saat scanning: {e}")
-                finally:
-                    work_queue.task_done()
-
-        await asyncio.gather(*(worker_account(c) for c in clients))
+        # Jalankan pindaian secara async teratur
+        await asyncio.gather(*(worker(u) for u in candidates))
 
         if not found_avail:
             await context.bot.edit_message_text(
                 inline_message_id=inline_msg_id,
-                text=f"❌ @{base} ({lbl}) ga ada atau akun gua limit jadi ga nemu"
+                text=f"❌ @{base} ({lbl}) ga ada atau akun gua limit jadi gak nemu"
             )
             return
 
@@ -332,8 +333,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         page_text = (
-            f"hasil scan untuk @{base} ({lbl}) \n"
-            f"ada {len(found_avail)} usn tersedia\n\n" + 
+            f"hasil scan untuk @{base} ({lbl})"
+            f" ada {len(found_avail)} usn\n\n" + 
             "\n".join(pages[0])
         )
         
@@ -348,6 +349,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Gagal update hasil akhir: {e}")
 
+    # 2. Handler Pindah Halaman (1, 2, 3...)
     elif data.startswith("page_"):
         _, mode_key, base, page_idx = data.split("_", 3)
         page_idx = int(page_idx)
@@ -365,7 +367,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         page_text = (
-            f"hasil scan @{base} ({lbl}) ada {sum(len(p) for p in pages)} usn\n"
+            f" hasil scan @{base} ({lbl}) ada  {sum(len(p) for p in pages)} usn\n"
             f"{page_idx + 1}/{len(pages)}\n\n" + 
             "\n".join(pages[page_idx])
         )
@@ -386,33 +388,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id in BANNED_USERS: return
-    await track_user(user, context)
-    await update.message.reply_text("Bot aktif. Gunakan via inline mode!")
-
-async def get_users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if user.id != ADMIN_ID:
-        return
-
-    if not os.path.exists(USER_FILE):
-        await update.message.reply_text("Belum ada data pengguna.")
-        return
-
-    with open(USER_FILE, "r", encoding="utf-8") as f:
-        lines = [line.strip() for line in f if line.strip()]
-
-    if not lines:
-        await update.message.reply_text("Belum ada data pengguna.")
-        return
-
-    text = f"📊 <b>Total Pengguna Terdata: {len(ALL_USERS)}</b>\n\n"
-    recent = lines[-50:]
-    text += "\n".join(recent)
-
-    if len(lines) > 50:
-        text += f"\n\n<i>(Menampilkan 50 pengguna terakhir dari total {len(lines)})</i>"
-
-    await update.message.reply_text(text, parse_mode="HTML")
+    save_user(user.id)
+    await notify_admin(context, user, "Menjalankan /start")
+    await update.message.reply_text("P")
 
 async def post_init(application):
     logger.info("⚙️ Inisialisasi Telethon sessions...")
@@ -430,7 +408,6 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("users", get_users_list))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
