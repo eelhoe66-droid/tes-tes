@@ -31,6 +31,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, 
     InlineQueryHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
+from telegram import InlineQueryResultPhoto
 
 # Configuration from Environment Variables
 API_ID = os.getenv("API_ID")
@@ -207,28 +208,26 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         results = [
             # Menu 1: hi
-            InlineQueryResultArticle(
-                id="info",
-                title="⚠️ hi",
-                description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
-                thumbnail_url=URL_THUMB_INFO, 
-                input_message_content=InputTextMessageContent(
-                    text=f'<a href="{URL_FOTO_INFO}">&#8203;</a> ga sih bercanda, pake aja',
-                    parse_mode="HTML"
-                )
-            ),
-            # Menu 2: misal
-            InlineQueryResultArticle(
-                id="help",
-                title="misal",
-                description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
-                thumbnail_url=URL_THUMB_MISAL,
-                input_message_content=InputTextMessageContent(
-                    text=f'<a href="{URL_FOTO_MISAL}">&#8203;</a>💡 London is blue -Subaru',
-                    parse_mode="HTML"
-                )
-            )
-        ]
+    InlineQueryResultPhoto(
+        id="info",
+        title="⚠️ hi",
+        description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
+        thumbnail_url="https://files.catbox.moe/n4zdf7.jpg",  # Gambar kecil di list menu
+        photo_url="https://files.catbox.moe/c84dkg.jpg",      # Gambar utama yang pasti muncul saat dipencet
+        caption="ga sih bercanda, pake aja",
+    ),
+    # Menu 2: misal
+    InlineQueryResultPhoto(
+        id="help",
+        title="misal",
+        description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
+        thumbnail_url="https://files.catbox.moe/faj4xi.jpg", # Gambar kecil di list menu
+        photo_url="https://files.catbox.moe/faj4xi.jpg",     # Gambar utama yang pasti muncul saat dipencet
+        caption="💡 London is blue -Subaru",
+    )
+]
+
+   
         await update.inline_query.answer(results, cache_time=1)
         return
 
