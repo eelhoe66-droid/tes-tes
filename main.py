@@ -139,35 +139,32 @@ async def init_clients():
         logger.error("❌ API_ID atau API_HASH kosong di Environment Variables!")
         return
 
-    # Debugging: Cetak semua file yang ada di folder root Railway
-    try:
-        files_in_dir = os.listdir(DATA_DIR)
-        session_files = [f for f in files_in_dir if f.endswith('.session')]
-        logger.info(f"📂 Daftar file .session yang terbaca di Railway: {session_files}")
-    except Exception as e:
-        logger.error(f"Gagal membaca folder: {e}")
-
+    # KODE BARU: Langsung cari file dengan awalan 'my_account'
+    # 1. Cek file my_account.session (tanpa angka)
+    session_targets = [f"{DATA_DIR}my_account"]
+    
+    # 2. Cek file my_account1.session sampai my_account20.session
     for i in range(1, 21):
-        # Sesuaikan 'acc' jika nama file session Anda berawalan lain
-        s = f"{DATA_DIR}acc{i}"
+        session_targets.append(f"{DATA_DIR}my_account{i}")
+
+    for s in session_targets:
         session_path = f"{s}.session"
-        
         if not os.path.exists(session_path):
             continue
             
         try:
-            logger.info(f"🔄 Mencoba menghubungkan {session_path}...")
             c = TelegramClient(s, int(API_ID), API_HASH)
             await c.connect()
             
             if await c.is_user_authorized():
                 clients.append(c)
-                logger.info(f"✅ {session_path} BERHASIL Authorized!")
+                logger.info(f"✅ {session_path} BERHASIL terhubung dan Authorized!")
             else: 
-                logger.warning(f"⚠️ {session_path} ADA, tapi TIDAK Authorized (Beda API_ID / Sesi Hangus)!")
+                logger.warning(f"⚠️ {session_path} ADA, tapi TIDAK Authorized (Beda API_ID / Sesi Expired)!")
                 await c.disconnect()
         except Exception as e: 
             logger.error(f"❌ Gagal memuat {session_path}: {e}")
+
 # ================== INLINE HANDLER ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
