@@ -188,7 +188,7 @@ def build_pagination_keyboard(current_page, total_pages, target_base, mode_key):
     return InlineKeyboardMarkup([buttons])
 
 # ================== INLINE HANDLER ==================
-from telegram import InlineQueryResultPhoto, InlineQueryResultArticle, InputTextMessageContent
+from telegram import InlineQueryResultArticle, InputTextMessageContent
 
 # ================== LINK FOTO CUSTOM ==================
 # Ganti dengan URL foto kamu (.jpg / .png)
@@ -197,7 +197,6 @@ URL_THUMB_INFO = "https://files.catbox.moe/n4zdf7.jpg"
 
 URL_FOTO_MISAL = "https://files.catbox.moe/faj4xi.jpg"
 URL_THUMB_MISAL = "https://files.catbox.moe/faj4xi.jpg"
-
 
 # ================== POTONGAN KODE INLINE QUERY ==================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,27 +210,28 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not query:
         results = [
-            # Menu 1: Foto + Teks Info
-            InlineQueryResultPhoto(
+            # Menu 1: hi
+            InlineQueryResultArticle(
                 id="info",
                 title="⚠️ hi",
                 description="bot ini khusus gw dan temen temen gw, selain itu gw ban",
-                thumbnail_url=URL_THUMB_INFO,  # Gambar kecil di sebelah kiri list menu
-                photo_url=URL_FOTO_INFO,       # Foto besar yang terkirim saat dipencet
-                caption="p",
-                parse_mode="Markdown"
+                thumbnail_url=URL_THUMB_INFO,  # Gambar kecil kotak di sebelah kiri
+                input_message_content=InputTextMessageContent(
+                    # Trik menyisipkan foto di paling depan teks lewat tag HTML hidden (&#8203;)
+                    text=f'<a href="{URL_FOTO_INFO}">&#8203;</a> ga sih bercanda, pake aja',
+                    parse_mode="HTML"
+                )
             ),
-            # Menu 2: Foto + Teks Misal
-            InlineQueryResultPhoto(
+            # Menu 2: misal
+            InlineQueryResultArticle(
                 id="help",
                 title="misal",
                 description="anjay, uncommon anjay, tamping anjay, ganhur anjay, dll",
-                thumbnail_url=URL_THUMB_MISAL, # Gambar kecil di sebelah kiri list menu
-                photo_url=URL_FOTO_MISAL,      # Foto besar yang terkirim saat dipencet
-                caption=(
-                    "London is blue"
-                ),
-                parse_mode="Markdown"
+                thumbnail_url=URL_THUMB_MISAL, # Gambar kecil kotak di sebelah kiri
+                input_message_content=InputTextMessageContent(
+                    text=f'<a href="{URL_FOTO_MISAL}">&#8203;</a>💡 London is blue -Subaru',
+                    parse_mode="HTML"
+                )
             )
         ]
         await update.inline_query.answer(results, cache_time=1)
